@@ -1,6 +1,6 @@
 # World LOD: replacing the upper-Shift base mesh
 
-Updated: 2026-10-29
+Updated: 2026-11-05
 
 Goal: upper Shift levels (user levels 3/4, internal 4/5) draw the city's low
 "base" LOD, which looks poor, mainly the ground and the textures. The plan is to
@@ -271,6 +271,9 @@ levels it overlaps only the cells loaded around the cursor. `[bake]
 height_offset` (default +0.05 m) puts the bake above them, so the map looks the
 same inside and outside the loaded area.
 
+**Correction (runtime, 2026-11-05):** the base is drawn while driving too, not
+only in upper Shift; see "Distant flicker while driving" below.
+
 ## Bake fixes and optimisation (static, verified offline)
 
 - **Stock terrain parts share their LOD with other stock geometry.** 160 of the
@@ -448,3 +451,57 @@ city before and 0.09% after, both haze. So the VM shows no flicker either way
 and can't confirm the fix; the lower upper-Shift level, where the user saw it,
 wasn't reached (a zoom tap at 2-3 frames a second is lost, or the probe's car
 takes the game out of the overview).
+
+## Distant flicker while driving (2026-11-05)
+
+The user saw surfaces flicker in the distance while driving with the full map,
+and others flicker close by. Tools: DSF Enhanced `[Debug] WorldBaseKey`
+(`src/world_base.inl`), a hook on the two calls of
+`ShiftSector_EmitDrawMetadata` (0x6BACB0, cdecl, 7 arguments; callers 0x6BB7DF,
+0x6BB9DE) that leaves out chosen base draws and logs counts every 2 s. Modes:
+BASE ALL (as the game), BASE NONE (no base draws), BASE SHELLS (the terrain
+parts, where worldlod's bake lives, left out) and BASE FAR (the terrain parts
+left out where the cell's own detail is drawn).
+
+What the function reads (static, decompiled; the hook reads the same):
+
+- sector `+0x94` = descriptor; descriptor `+0x10` != 0 for the base, `+0x1C`
+  owner, `+0x18` render state. Owner `+8` is the GEBI header (its `+4`, `+0x24`
+  and `+0x28` are the rebased tables).
+- instance `i = first + index`: GEBI record `owner[+8][+4] +
+  owner[+0x2C0C][i] * 0x14`. Its group, `(record +4 >> 20) & 0x19`, is 0 for
+  the building shells (technique by cell residency) and 1 for the terrain parts
+  (always the far technique).
+- the base instance's cell: render state `+0x1E7B0 + i * 2`, packed as
+  `(cell / 29, cell % 29)`. A detailed cell is loaded when that pair is in the
+  list at `context[+0xD4] +0x347EC` (end `+0x347E8`). A region model's cell is
+  its GEBI header's `+0x08` column and `+0x0A` row, the same pair.
+
+Findings (runtime, the user's machine, 1 session):
+
+| Question | Answer |
+| --- | --- |
+| Is the base drawn while driving? | Yes: about 300-1,700 shell draws and 200-3,000 terrain-part draws a second. The earlier note (base only at upper Shift) was wrong. |
+| Do base and detail overlap? | Yes: most terrain parts drawn are in loaded cells (470 of 477 in one sample), so worldlod's bake and the cell's own geometry are drawn in the same place. |
+| Is the distant flicker the bake? | Yes: BASE FAR stopped it. The user narrowed it to the building detail, not the ground. |
+| Does hiding the bake per cell fix it? | It stops the flicker but loses detail (`img/flicker-base-far-vs-all.jpg`: BASE FAR above, BASE ALL below; storefronts, windows and roof detail go). The game draws only part of a loaded cell's detail at a distance, and the bake is one part per 512 m cell. Testing "loaded" alone also emptied Shift around the cursor, where cells stay loaded while their detail isn't drawn; "loaded and its models drawn in the last 150 ms" fixed that. |
+| Does a depth push fix it? | No. Draws with the far technique's vertex shaders (24 of its 36 are used by no other technique, 94% of the baked building triangles; FNV-1a hashes matched the game's) were given `D3DRS_DEPTHBIAS` toward the camera, 2 to 16 steps of the 24-bit buffer. No step changed the flicker, so the copies are most likely not fighting each other (that the bias reached the GPU was not checked: the game goes through a d3d9.dll wrapper). |
+| Does the stock map flicker? | Yes, at other distances and less noticeably. |
+| The close flicker | No mode changed it: not the base. |
+
+**Conclusion.** The flicker that remains is most likely the game's own
+building detail, not worldlod's copy fighting the cell's copy. Inside one model,
+layered panels and trims lie within 2 cm of each other (106,017 pairs in the
+bake, nine in ten inside one placed model, see "Building detail z-fighting with
+the shells"). The stock game draws those models only close by, where the depth
+buffer separates the layers (about 1.6 cm per step at 200 m with the 0.15 m near
+plane, `d^2 / (near * 2^24)`). worldlod draws them out to the map's edge, where
+a step is tens of centimetres, so the layers fight. Separating them by that
+much would visibly change the models, and leaving out the covered layer needs
+clipping faces and risks holes, so this is not pursued. Per-cell hiding
+(BASE FAR) stays a debug mode only: it trades the flicker for the detail that
+worldlod adds.
+
+If it is picked up again: a bake option to drop the lower of two coplanar
+faces of the same model where one covers the other completely (the overlap
+stage already finds the pairs) would remove part of it without holes.
