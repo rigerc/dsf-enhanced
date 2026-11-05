@@ -62,7 +62,7 @@ char g_d5_helper_log[MAX_PATH] = {};
 int g_d5_style = 0;
 float g_d5_intensity = 1.0f;
 float g_d5_tone_strength = 0.3f;
-float g_d5_structure_strength = 0.7f;
+float g_d5_structure_strength = 0.25f;
 float g_d5_skin_strength = 0.5f;
 float g_d5_cockpit_depth = 1.5f;
 bool g_d5_frame_time_log = false;
@@ -108,7 +108,7 @@ void LoadDlss5BridgeConfig(const char* ini_path)
     g_d5_style = ClampInt(GetPrivateProfileIntA("DLSS5", "Style", 0, ini_path), 0, 2);
     g_d5_intensity = std::max(0.0f, std::min(ReadProfileFloat("DLSS5", "Intensity", 1.0f, ini_path), 1.0f));
     g_d5_tone_strength = std::max(0.0f, std::min(ReadProfileFloat("DLSS5", "ToneStrength", 0.3f, ini_path), 1.0f));
-    g_d5_structure_strength = std::max(0.0f, std::min(ReadProfileFloat("DLSS5", "StructureStrength", 0.7f, ini_path), 1.0f));
+    g_d5_structure_strength = std::max(0.0f, std::min(ReadProfileFloat("DLSS5", "StructureStrength", 0.25f, ini_path), 1.0f));
     g_d5_skin_strength = std::max(0.0f, std::min(ReadProfileFloat("DLSS5", "SkinStrength", 0.5f, ini_path), 1.0f));
     g_d5_cockpit_depth = std::max(0.0f, std::min(ReadProfileFloat("DLSS5", "CockpitDepth", 1.5f, ini_path), 10.0f));
     g_d5_frame_time_log = GetPrivateProfileIntA("DLSS5", "FrameTimeLog", 0, ini_path) != 0;
