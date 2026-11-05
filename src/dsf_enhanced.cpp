@@ -444,15 +444,22 @@ void BuildGamePath(char* out, DWORD out_size, const char* name)
     std::snprintf(out, out_size, "%s%s", module_path, name);
 }
 
+// One line at a time: the CRT's append mode seeks to the end and then writes, so two threads
+// logging at once (the init thread's loop and a game thread, such as [Files] Redirect's opens)
+// could write at the same offset and one line overwrite the other.
+SRWLOCK g_log_lock = SRWLOCK_INIT;
+
 void Log(const char* fmt, ...)
 {
     if (!g_log_enabled || g_log_path[0] == '\0') {
         return;
     }
 
+    AcquireSRWLockExclusive(&g_log_lock);
     FILE* file = nullptr;
     fopen_s(&file, g_log_path, "a");
     if (file == nullptr) {
+        ReleaseSRWLockExclusive(&g_log_lock);
         return;
     }
 
@@ -476,6 +483,7 @@ void Log(const char* fmt, ...)
     va_end(args);
     std::fprintf(file, "\n");
     std::fclose(file);
+    ReleaseSRWLockExclusive(&g_log_lock);
 }
 
 float ReadProfileFloat(const char* section, const char* key, float fallback, const char* ini_path)
