@@ -75,7 +75,7 @@ Changes need a game restart.
   - `0` (default) is the finished frame before the HUD, with the game's colour grade, grain and bloom already in it.
   - `1` is the 3D scene before the game's post-processing, as RTX Remix does it. The game adds its bloom, colour grade, grain and HUD afterwards, so its warm grade survives. With `Input=0` and a high `ToneStrength`, DLSS 5 tends to wash the grade out.
 - `HdrExposure` (default `0.6`, `Input=1` only) sets how bright the image DLSS 5 gets is. It's undone on the way back.
-- `Style` (0-2, the model), `Intensity`, `ToneStrength` and `StructureStrength` (0-1) are RTX Remix's settings, with its defaults (0, 1, 0.3, 0.7). On this game the defaults change the picture by about 3-5 of 255 per colour channel on average. `Style=1`, `ToneStrength=1` and `StructureStrength=1` give the strongest change, about 5-13 of 255.
+- `Style` (0-2, the model), `Intensity`, `ToneStrength` and `StructureStrength` (0-1) are RTX Remix's settings. The defaults are Remix's (0, 1, 0.3), except `StructureStrength`, which is 0.25 here and 0.7 in Remix. Higher values put a light rim on shadows: DLSS 5 deepens the soft gradient inside them, so the core gets darker and the edge lighter. Measured with `Style=1` and `ToneStrength=1`: under a car at `StructureStrength=1` the shadow's edge came out 5.8 times as bright as its core, against 1.8 without DLSS 5 and 2.6 at 0.25. On this game Remix's defaults change the picture by about 3-5 of 255 per colour channel on average. `Style=1`, `ToneStrength=1` and `StructureStrength=1` give the strongest change, about 5-13 of 255.
 
 These `[DLSS5]` keys apply to DLAA too: `HelperPath`, `HelperRuntime`, `HelperLog`, `HelperTransport`, `FrameTimeLog`, `ObjectMotion`, `CockpitDepth` and `ToggleIndicator`.
 
