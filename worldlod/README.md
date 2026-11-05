@@ -6,8 +6,8 @@ When you Shift up, the game draws one low-detail model of the whole city: flat,
 vertex-coloured ground under plain building shells. worldlod rebuilds that model
 from the game's own detailed areas, with real roads, kerbs, paving, trees and bushes,
 building detail (storefronts, rooftop units, fire escapes, containers) and
-painted road text. It reads your copy of the game and writes the new map into
-it, with a backup. No game data is shipped.
+painted road text. It reads your copy of the game and puts the new map beside
+the game's own, which stays as it is. No game data is shipped.
 
 ## Install
 
@@ -25,13 +25,26 @@ worldlod runs on). Then it:
    it isn't there yet (from the zip's `plugin` folder; your
    `dsf_enhanced.ini` and ASI loader stay if you have them). The new map is
    bigger than the stock engine allows; DSF Enhanced's `[Limits]` fixes lift
-   that, without them the game crashes while loading;
+   that. It also gives the game the new map (below);
 2. builds the map from your game's files (a minute or two);
-3. backs up the game's original map to `worldlod-backup` and puts the new one
-   in its place, then deletes its build files.
+3. puts the map in the game's `worldlod-map` folder and lists it for DSF
+   Enhanced (`dsf_enhanced\redirect\worldlod.txt`), then deletes its build files.
 
-To undo: `install.cmd --uninstall` puts the original map back, and takes DSF
-Enhanced out again if worldlod put it there.
+The game's `Install\san_francisco.dngc` is not changed. DSF Enhanced opens
+worldlod's map in its place while the game runs, and only while the `[Limits]`
+fixes the map needs are on, so the game never loads it without them. Without
+DSF Enhanced, or with one of those fixes turned off, the game shows its own map.
+
+To undo: `install.cmd --uninstall` takes the map out, and DSF Enhanced too if
+worldlod put it there.
+
+worldlod 0.1 replaced the game's map and kept the original in
+`worldlod-backup`. Installing or uninstalling this version over it moves that
+original back first.
+
+With the Forza car mod ([driversf-forza](https://github.com/xob0t/driversf-forza))
+installed, its `dsfforza.asi` must be a version that passes the map on to DSF
+Enhanced; with an older one the game shows its own map, and install says so.
 
 ## Options
 
@@ -49,9 +62,7 @@ The roads and paving are always in. `.\install.cmd --help` lists every option.
 A build runs at idle priority, so the PC stays usable meanwhile. Its files
 (about 1 GB, in `work` beside `install.cmd`) are deleted once it is installed.
 
-What stays on your PC: worldlod's folder; the original map, backed up in the
-game's `worldlod-backup` folder (about 600 MB, kept after uninstall too, so you
-can delete it yourself once you're done); uv with its Python and package cache
+What stays on your PC after uninstalling: worldlod's folder; uv with its Python and package cache
 (under `%USERPROFILE%\.local\bin` and `%LOCALAPPDATA%\uv`); and, if
 `install.cmd` asked for the game folder, your user's `DSF_GAME_DIR` setting.
 
@@ -84,8 +95,8 @@ repository, `uv run worldlod <command>` runs any of them:
 
 | Command | Does |
 | --- | --- |
-| `worldlod install` | builds the map if it is missing or out of date, backs up the game's `san_francisco.dngc` once to `<game>/worldlod-backup/` (with its SHA-256) and puts the build in its place |
-| `worldlod uninstall` | puts the backed-up original back |
+| `worldlod install` | builds the map if it is missing or out of date, copies it to `<game>/worldlod-map/` and writes DSF Enhanced's redirect table (`<game>/dsf_enhanced/redirect/worldlod.txt`) |
+| `worldlod uninstall` | takes the table and the map out (and DSF Enhanced, if install put it in) |
 | `worldlod build` | bakes the detailed regions into the base LOD, writes the new `san_francisco.dngc` and checks it (GEGR references, MDID, group sizes, streamer budgets) |
 | `worldlod config` | prints the settings in effect |
 | `worldlod info` | summarises the game's world archive |
@@ -97,15 +108,19 @@ A build is skipped while the code, the settings and the game's archive are
 unchanged; `bake` likewise reuses each region's earlier output. `--archive
 <file>` makes `info`, `bake` and `render` read another world archive.
 
-`install` refuses while the game runs, when your `dsf_enhanced.ini` turns one
-of the needed `[Limits]` off, when the build fails its check, or when the game's
-file changed since the last install (another mod). DSF Enhanced comes from the
-ZIP's `plugin` folder (`--plugin`) and goes in only after the map has built and
-passed its check; it replaces an older DSF Enhanced where that one is (the game
-folder, `scripts` or `plugins`), keeps the files it replaces in
-`worldlod-backup`, and adds `winmm.dll` only when there is no ASI loader.
-Uninstall keeps that loader while other ASI mods use it. It swaps files by rename, so a hard link to the original
-keeps the original bytes.
+`install` refuses while the game runs, when your `dsf_enhanced.ini` turns off
+one of the needed `[Limits]` or `[Files] Redirect`, or when the build fails its
+check. It writes the redirect table last, after the map is in place, and
+uninstall takes it out first, so the game never finds a table without its map.
+DSF Enhanced comes from the ZIP's `plugin` folder (`--plugin`) and goes in only
+after the map has built and passed its check. It replaces an older DSF Enhanced
+where that one is (the game folder, `scripts` or `plugins`), keeps the files it
+replaces in `worldlod-map\plugin`, and adds `winmm.dll` only when there is no
+ASI loader. Uninstall keeps that loader while other ASI mods use it.
+
+A 0.1 install had swapped the build into the game's file. Install and uninstall
+move the original back from `worldlod-backup` (checked against its SHA-256),
+and the build reads that backup until then.
 
 ## How it works
 

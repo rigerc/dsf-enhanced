@@ -1,6 +1,6 @@
 [project]
 name = "dsf-worldlod"
-version = "0.1.0"
+version = "0.2.0"
 description = "Builds a high-detail base LOD for Driver: San Francisco's upper Shift levels from the game's detailed regions"
 readme = "README.md"
 license = "MIT"

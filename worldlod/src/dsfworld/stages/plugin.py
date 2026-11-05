@@ -1,5 +1,7 @@
-"""DSF Enhanced, whose [Limits] fixes the new map needs: the built archive is bigger than three
-fixed-size engine pools allow, and the stock game crashes while loading it.
+"""DSF Enhanced, which gives the game the new map and the [Limits] fixes it needs: the built archive
+is bigger than three fixed-size engine pools allow, and the stock game crashes while loading it.
+Its [Files] Redirect opens worldlod's map in place of the game's (install.py writes the table), and
+only while those three fixes are in; without the plugin the game reads its own map.
 
 When the game lacks the plugin (or has one without the fixes, or no ASI loader),
 install puts the DSF Enhanced that comes with worldlod (the release ZIP's plugin
@@ -23,10 +25,19 @@ from dsfworld import ui
 
 ASI, INI, LOADER = "dsf_enhanced.asi", "dsf_enhanced.ini", "winmm.dll"
 ASI_FOLDERS = ("", "scripts", "plugins")  # where Ultimate ASI Loader loads .asi files from
-FIXES = b"SubmodelTableExtraNodes"  # a setting only plugins with all three [Limits] fixes know
+# In every DSF Enhanced that has all three [Limits] fixes and [Files] Redirect: a setting only those
+# fixes know, and the folder of the redirect tables
+FIXES = (b"SubmodelTableExtraNodes", rb"dsf_enhanced\redirect" + b"\\")
 # [Limits] keys the build needs, and the value at or below which each is off
 LIMITS = {"ResourceArenaExtraNodes": 0, "PendingResourceReferences": 16384, "SubmodelTableExtraNodes": 0}
 ASI_LOADER = b"ultimate-asi-loader"  # in every Ultimate ASI Loader DLL (its build path)
+# The Forza car mod's plugin patches the call the world archive is opened from (for its own GUI
+# files); from the version with this capability on it passes every other file on to DSF Enhanced.
+FORZA_ASI, FORZA_CHAIN = "dsfforza.asi", b"archive.redirect_chain"
+
+
+def _has_fixes(data: bytes) -> bool:
+    return all(marker in data for marker in FIXES)
 
 
 def find_asi(game: Path) -> Path | None:
@@ -37,7 +48,7 @@ def find_asi(game: Path) -> Path | None:
 def has_fixes(game: Path) -> bool:
     """Whether the game folder has a DSF Enhanced with the [Limits] fixes."""
     asi = find_asi(game)
-    return asi is not None and FIXES in asi.read_bytes()
+    return asi is not None and _has_fixes(asi.read_bytes())
 
 
 def has_loader(game: Path) -> bool:
@@ -56,25 +67,41 @@ def problem(game: Path) -> str | None:
     if find_asi(game) is None:
         return f"DSF Enhanced isn't installed ({ASI} not in {game})"
     if not has_fixes(game):
-        return "the installed DSF Enhanced is too old: it lacks the [Limits] fixes"
+        return "the installed DSF Enhanced is too old: it lacks the [Limits] fixes or [Files] Redirect"
     if not has_loader(game):
         return "there is no ASI loader to load DSF Enhanced"
     return limits_off(game)
 
 
+def _int(section, key: str) -> int | None:
+    value = section.get(key) if section is not None else None
+    return int(value) if value is not None and value.strip().lstrip("-").isdigit() else None
+
+
 def limits_off(game: Path) -> str | None:
-    """Which of the needed [Limits] the game's dsf_enhanced.ini turns off, or None."""
+    """Which of the needed [Limits] (or [Files] Redirect) the game's dsf_enhanced.ini turns off, or None."""
     asi = find_asi(game)
     path = (asi.parent if asi else game) / INI
     ini = configparser.ConfigParser(inline_comment_prefixes=(";",), strict=False)
     if path.exists():
         ini.read_string(path.read_text(encoding="utf-8", errors="replace"))
-    limits = ini["Limits"] if ini.has_section("Limits") else {}
+    limits = ini["Limits"] if ini.has_section("Limits") else None
     for key, off in LIMITS.items():
-        value = limits.get(key)
-        if value is not None and value.strip().lstrip("-").isdigit() and int(value) <= off:
-            return f"{INI} turns off [Limits] {key}: remove that line or raise it"
+        value = _int(limits, key)
+        if value is not None and value <= off:
+            return (
+                f"{INI} turns off [Limits] {key}, which the new map needs (without it the game shows its own "
+                "map): remove that line or raise it"
+            )
+    if _int(ini["Files"] if ini.has_section("Files") else None, "Redirect") == 0:
+        return f"{INI} turns off [Files] Redirect, which gives the game the new map: remove that line or set it to 1"
     return None
+
+
+def forza_too_old(game: Path) -> Path | None:
+    """The Forza car mod's plugin, if the game has one that keeps the world archive from DSF Enhanced."""
+    found = next((game / d / FORZA_ASI for d in ASI_FOLDERS if (game / d / FORZA_ASI).exists()), None)
+    return found if found is not None and FORZA_CHAIN not in found.read_bytes() else None
 
 
 def check_source(source: Path | None) -> None:
@@ -84,8 +111,10 @@ def check_source(source: Path | None) -> None:
             "The new map needs DSF Enhanced's [Limits] fixes, or the game crashes while loading: run worldlod "
             "through install.cmd from its release ZIP (it brings DSF Enhanced), or install DSF Enhanced first"
         )
-    if FIXES not in (source / ASI).read_bytes():
-        raise SystemExit(f"The DSF Enhanced in {source} doesn't have the [Limits] fixes the new map needs")
+    if not _has_fixes((source / ASI).read_bytes()):
+        raise SystemExit(
+            f"The DSF Enhanced in {source} doesn't have the [Limits] fixes and [Files] Redirect the new map needs"
+        )
 
 
 def install(game: Path, backup_dir: Path, manifest: dict, source: Path) -> None:

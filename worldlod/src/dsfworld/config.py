@@ -11,7 +11,9 @@ from pathlib import Path
 
 DEFAULTS = Path(__file__).with_name("default.toml")
 USER_FILE = "worldlod.toml"
-BACKUP_DIR = "worldlod-backup"  # in the game folder, written by `worldlod install`
+MAP_DIR = "worldlod-map"  # in the game folder: the installed map and its manifest (`worldlod install`)
+REDIRECT_TABLE = "dsf_enhanced/redirect/worldlod.txt"  # in the game folder: DSF Enhanced opens the map from it
+BACKUP_DIR = "worldlod-backup"  # in the game folder: the original map, from installs up to 0.1 (they replaced it)
 GAME_EXE = "Driver.exe"
 WORK_ENV = "WORLDLOD_WORK"  # the work folder when [run] work_dir is empty (install.cmd: work\ beside it)
 PROJECT = Path(__file__).resolve().parents[2]  # src/dsfworld -> worldlod/ in a checkout, app\ in the release
@@ -77,18 +79,22 @@ class Config:
 
     @property
     def game_archive(self) -> Path:
-        """The world archive in the game folder (what install replaces)."""
+        """The world archive in the game folder (the one the installed map stands in for)."""
         return self.game_dir / self.data["game"]["archive"]
 
     @property
     def archive(self) -> Path:
-        """The world archive the pipeline reads: source if set, else the original. After `worldlod
-        install` the game's file is a build, so the backup install made is read instead."""
+        """The world archive the pipeline reads: source if set, else the game's. While an install from
+        version 0.1 or earlier is in, the game's file is a build, and the original is in its backup."""
         if self.source is not None:
             return self.source
         game = self.game_archive
-        backup = self.game_dir / BACKUP_DIR / game.name
-        return backup if backup.exists() else game
+        old = self.game_dir / BACKUP_DIR
+        try:
+            swapped = bool(json.loads((old / "manifest.json").read_text()).get("installed"))
+        except (OSError, ValueError):
+            swapped = False
+        return old / game.name if swapped and (old / game.name).exists() else game
 
     @property
     def packed_archive(self) -> Path:

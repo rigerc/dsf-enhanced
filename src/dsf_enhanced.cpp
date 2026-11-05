@@ -363,6 +363,10 @@ std::uint8_t* g_submodel_extension_end = nullptr;
 void* g_submodel_pool_alloc = nullptr;
 DWORD g_submodel_table_logged_peak = 0;
 bool g_pending_reference_patch_applied = false;
+// Set once each patch is in: [Files] redirects that need these limits wait for them (file_redirect.inl).
+volatile bool g_resource_arena_patch_applied = false;
+volatile bool g_submodel_table_patch_applied = false;
+bool g_file_redirect = true;  // [Files] Redirect
 DWORD g_pending_reference_logged_peak = 0;
 int g_release_list_capacity = 262144;
 std::uint8_t* g_release_list = nullptr;
@@ -602,6 +606,7 @@ void LoadConfig()
     LoadDlaaConfig(ini_path);
     LoadToggleConfig(ini_path);
     LoadReplayConfig(ini_path);
+    g_file_redirect = GetPrivateProfileIntA("Files", "Redirect", 1, ini_path) != 0;
 }
 
 bool WriteMemory(void* address, const void* data, size_t size)
@@ -2265,6 +2270,7 @@ HRESULT STDMETHODCALLTYPE ProxyReset(IDirect3DDevice9* device, D3DPRESENT_PARAME
 #include "dlaa.inl"
 #include "toggles.inl"
 #include "replay_film.inl"
+#include "file_redirect.inl"
 
 bool HookDeviceVTable(void** vtable, size_t index, void* replacement, void** original, const char* name)
 {
@@ -2633,6 +2639,7 @@ void ApplyResourceArenaPatch(const ModuleRange& range)
         Log("ResourceArena: failed to patch RVA 0x%08lX", static_cast<unsigned long>(kResourceHashBumpRva));
         return;
     }
+    g_resource_arena_patch_applied = true;
     Log(
         "ResourceArena: %d stock nodes, then %d extension nodes at 0x%p (%lu KB)",
         g_resource_arena_stock_nodes,
@@ -2726,6 +2733,7 @@ void ApplySubmodelTablePatch(const ModuleRange& range)
         Log("SubmodelTable: failed to patch RVA 0x%08lX", static_cast<unsigned long>(kSubmodelNodeAllocCallRva));
         return;
     }
+    g_submodel_table_patch_applied = true;
     Log(
         "SubmodelTable: 15000 stock nodes, then %d extension nodes at 0x%p (%lu KB)",
         g_submodel_table_extra_nodes,
@@ -4400,6 +4408,7 @@ void ApplyPatches()
 DWORD WINAPI InitThread(LPVOID)
 {
     ApplyPatches();
+    FileRedirectPatchesDone();
     for (unsigned tick = 0;; ++tick) {
         const ModuleRange exe = GetExeRange();
         // LOD thresholds and flare curves are re-checked every 250 ms, so a graphics-settings
@@ -4438,6 +4447,8 @@ BOOL APIENTRY DllMain(HMODULE module, DWORD reason, LPVOID)
         // DllMain whether to leave the queue to this plugin, from the marker this creates.
         LoadConfig();
         ApplyDrawQueuePatch(GetExeRange());
+        // Before the game runs: it may open a listed file as soon as it starts.
+        ApplyFileRedirects(GetExeRange());
         const HANDLE thread = CreateThread(nullptr, 0, InitThread, nullptr, 0, nullptr);
         if (thread != nullptr) {
             CloseHandle(thread);
