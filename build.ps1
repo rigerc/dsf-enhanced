@@ -19,6 +19,12 @@ foreach ($dir in @($build, $dist)) {
 $asi = Join-Path $build "dsf_enhanced.asi"
 $test = Join-Path $build "cinematic_fit_test.exe"
 $jitterTest = Join-Path $build "vs_jitter_test.exe"
+$fovTest = Join-Path $build "fov_sites_test.exe"
+# With DSF_GAME_DIR set, the FOV site test also checks its table against that Driver.exe (read only).
+$fovTestArgs = ""
+if ($env:DSF_GAME_DIR -and (Test-Path -LiteralPath (Join-Path $env:DSF_GAME_DIR "Driver.exe"))) {
+  $fovTestArgs = "`"" + (Join-Path $env:DSF_GAME_DIR "Driver.exe") + "`""
+}
 # The redirect test writes a game folder layout beside itself: its own folder.
 $redirectDir = Join-Path $build "redirect_test"
 New-Item -ItemType Directory -Path $redirectDir | Out-Null
@@ -27,6 +33,9 @@ $commands = @(
   "cl /nologo /std:c++17 /EHsc /O2 /MT /LD /Fo:`"$build\\`" /Fe:`"$asi`" `"$root\src\dsf_enhanced.cpp`" user32.lib d3d9.lib dxguid.lib /link /MACHINE:X86 /MAP:`"$build\dsf_enhanced.map`"",
   "cl /nologo /std:c++17 /EHsc /O2 /Fo:`"$build\\`" /Fe:`"$test`" `"$root\tests\cinematic_fit_test.cpp`"",
   "`"$test`"",
+  # FOVScaling's sites (src/fov_sites.h): the reads of the degrees-to-radians constant that make a FOV.
+  "cl /nologo /std:c++17 /EHsc /O2 /Fo:`"$build\\`" /Fe:`"$fovTest`" `"$root\tests\fov_sites_test.cpp`"",
+  "`"$fovTest`" $fovTestArgs",
   # DLAA jitter's vertex shader patch: the self-test (d3dcompiler_47). The file says how to run it
   # over the game's shaders and on the GPU.
   "cl /nologo /std:c++17 /EHsc /O2 /D_CRT_SECURE_NO_WARNINGS /Fo:`"$build\\`" /Fe:`"$jitterTest`" `"$root\tests\vs_jitter_test.cpp`" d3d9.lib user32.lib",

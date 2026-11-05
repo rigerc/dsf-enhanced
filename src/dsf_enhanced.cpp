@@ -21,6 +21,7 @@
 
 #include "cinematic_fit.h"
 #include "dlss5_shared.h"
+#include "fov_sites.h"
 #include "vs_jitter_patch.h"
 #include "../dlss5/include/dsf_dlss5_pipe.h"
 #include "vk_min.h"
@@ -67,13 +68,19 @@ UINT g_game_render_width = 0;
 UINT g_game_render_height = 0;
 char g_log_path[MAX_PATH] = {};
 bool g_aspect_constant_patched = false;
-bool g_global_fov_scalar_patched = false;
+// FOVScaling: the FOV reads of the game's degrees-to-radians constant read this instead
+// (src/fov_sites.h); the constant itself keeps its value. Stock until the scale is known.
+volatile float g_fov_degrees_to_radians = 0.0174532924f;
+// The stock constant, for the stub that keeps a rotation next to a FOV site unscaled.
+float g_stock_degrees_to_radians = 0.0174532924f;
+bool g_fov_sites_patched = false;
+bool g_fov_sites_refused = false;
 LONG g_active_bink_count = 0;
 LONG g_active_cinematic_bink_count = 0;
 void* volatile g_last_d3d_device = nullptr;
 
 constexpr DWORD kAspect16x9Rva = 0x009E50B0;
-constexpr DWORD kGlobalFovScalarRva = 0x009D9A80;
+constexpr DWORD kDegreesToRadiansRva = fovsites::kDegreesToRadiansRva;
 constexpr DWORD kMovieDrawRva = 0x0036C5D0;
 constexpr DWORD kLegalScreenWaitBranchRva = 0x00399C4A;
 constexpr DWORD kLegalScreenBeginLoadingCallRva = 0x00399C92;   // call 0x4A20C0 when the legal screen ends
@@ -263,7 +270,7 @@ constexpr DWORD kInterestingVehicleSetSlotCountRva = 0x003EB3E0;
 constexpr DWORD kTrafficCandidateLateralWindowRva = 0x00B2A278;
 constexpr DWORD kTrafficCandidateForwardWindowRva = 0x00B2A27C;
 constexpr DWORD kOriginalAspect16x9Bits = 0x3FE38E39;
-constexpr DWORD kOriginalFovScalarBits = 0x3C8EFA35;
+constexpr DWORD kOriginalFovScalarBits = fovsites::kDegreesToRadiansBits;
 constexpr float kTrafficCandidateOriginalLateralWindow = 20.0f;
 constexpr float kTrafficCandidateOriginalForwardWindow = 6.0f;
 
@@ -1601,53 +1608,150 @@ float GetTargetFovScalar()
     return kDegreesToRadians * (aspect / (16.0f / 9.0f));
 }
 
-void ApplyGlobalFovScalarPatch(const ModuleRange& range, const char* source)
+// 0x5CD7F0 keeps the constant in xmm7 for its FOV and for one rotation (src/fov_sites.h,
+// kRollSiteRva). With xmm7 now the FOV scalar, the rotation's two multiplies run here with the
+// stock constant instead.
+__declspec(naked) void ProxyFovSiteRotation()
 {
-    if (!g_ultrawide_enabled || !g_fov_scaling || range.base == nullptr) {
+    __asm {
+        mulss xmm0, dword ptr [g_stock_degrees_to_radians]
+        mulss xmm6, xmm0
+        ret
+    }
+}
+
+// Points the FOV reads of the degrees-to-radians constant at g_fov_degrees_to_radians. All the
+// sites are checked first; if any differs from Driver.exe 1.04, none is patched.
+bool PatchFovSites(const ModuleRange& range, const char* source)
+{
+    using fovsites::Site;
+    const DWORD base = static_cast<DWORD>(reinterpret_cast<std::uintptr_t>(range.base));
+    const DWORD constant_va = base + kDegreesToRadiansRva;
+    const DWORD scalar_va = static_cast<DWORD>(reinterpret_cast<std::uintptr_t>(&g_fov_degrees_to_radians));
+
+    if (!IsRvaInRange(range, kDegreesToRadiansRva, sizeof(float)) ||
+        !IsRvaInRange(range, fovsites::kRollSiteRva, sizeof(fovsites::kRollSiteStock))) {
+        Log("%s: FOV scaling sites are outside the loaded image; FOV stays stock", source);
+        return false;
+    }
+    const DWORD constant_bits = *reinterpret_cast<const DWORD*>(range.base + kDegreesToRadiansRva);
+    if (constant_bits != kOriginalFovScalarBits) {
+        Log(
+            "%s: degrees-to-radians constant at RVA 0x%08lX is 0x%08lX, expected 0x%08lX; FOV stays stock",
+            source,
+            static_cast<unsigned long>(kDegreesToRadiansRva),
+            static_cast<unsigned long>(constant_bits),
+            static_cast<unsigned long>(kOriginalFovScalarBits)
+        );
+        return false;
+    }
+    for (const Site& site : fovsites::kFovSites) {
+        std::uint8_t expected[8] = {};
+        fovsites::SiteBytes(site, constant_va, expected);
+        if (!IsRvaInRange(range, site.rva, site.size) || std::memcmp(range.base + site.rva, expected, site.size) != 0) {
+            Log(
+                "%s: FOV site RVA 0x%08lX (%s) differs from Driver.exe 1.04; FOV stays stock",
+                source,
+                static_cast<unsigned long>(site.rva),
+                site.reader
+            );
+            return false;
+        }
+    }
+    auto* rotation_site = range.base + fovsites::kRollSiteRva;
+    if (std::memcmp(rotation_site, fovsites::kRollSiteStock, sizeof(fovsites::kRollSiteStock)) != 0) {
+        Log(
+            "%s: rotation site RVA 0x%08lX differs from Driver.exe 1.04; FOV stays stock",
+            source,
+            static_cast<unsigned long>(fovsites::kRollSiteRva)
+        );
+        return false;
+    }
+
+    // The rotation stub first: without it the sites must not move.
+    std::uint8_t rotation_patch[sizeof(fovsites::kRollSiteStock)] = { 0xE8 };
+    const auto relative = static_cast<std::int32_t>(
+        reinterpret_cast<std::uint8_t*>(&ProxyFovSiteRotation) - (rotation_site + 5));
+    std::memcpy(&rotation_patch[1], &relative, sizeof(relative));
+    std::memcpy(&rotation_patch[5], fovsites::kRollSiteTail, sizeof(fovsites::kRollSiteTail));
+    if (!WriteMemory(rotation_site, rotation_patch, sizeof(rotation_patch))) {
+        Log("%s: failed to patch rotation site RVA 0x%08lX; FOV stays stock", source, static_cast<unsigned long>(fovsites::kRollSiteRva));
+        return false;
+    }
+
+    for (size_t i = 0; i < fovsites::kFovSiteCount; ++i) {
+        const Site& site = fovsites::kFovSites[i];
+        std::uint8_t patched[8] = {};
+        fovsites::SiteBytes(site, scalar_va, patched);
+        if (!WriteMemory(range.base + site.rva, patched, site.size)) {
+            for (size_t j = 0; j < i; ++j) {
+                std::uint8_t stock[8] = {};
+                fovsites::SiteBytes(fovsites::kFovSites[j], constant_va, stock);
+                WriteMemory(range.base + fovsites::kFovSites[j].rva, stock, fovsites::kFovSites[j].size);
+            }
+            WriteMemory(rotation_site, fovsites::kRollSiteStock, sizeof(fovsites::kRollSiteStock));
+            Log(
+                "%s: failed to patch FOV site RVA 0x%08lX; the %u sites already patched were restored; FOV stays stock",
+                source,
+                static_cast<unsigned long>(site.rva),
+                static_cast<unsigned>(i)
+            );
+            return false;
+        }
+    }
+
+    for (const Site& site : fovsites::kFovSites) {
+        Log(
+            "%s: FOV site RVA 0x%08lX (%s) reads the FOV scalar at 0x%08lX",
+            source,
+            static_cast<unsigned long>(site.rva),
+            site.reader,
+            static_cast<unsigned long>(scalar_va)
+        );
+    }
+    Log(
+        "%s: rotation at RVA 0x%08lX keeps the stock constant (stub 0x%p)",
+        source,
+        static_cast<unsigned long>(fovsites::kRollSiteRva),
+        reinterpret_cast<void*>(&ProxyFovSiteRotation)
+    );
+    Log(
+        "%s: %u FOV sites patched; the degrees-to-radians constant at RVA 0x%08lX stays %.6f for its %u other readers",
+        source,
+        static_cast<unsigned>(fovsites::kFovSiteCount),
+        static_cast<unsigned long>(kDegreesToRadiansRva),
+        static_cast<double>(g_stock_degrees_to_radians),
+        static_cast<unsigned>(fovsites::kOtherReaderCount)
+    );
+    return true;
+}
+
+// FOVScaling: the camera FOV code converts its degrees with g_fov_degrees_to_radians, set to the
+// target scalar here. The game's shared constant, which also turns the cockpit needles, is left
+// alone (issue #32).
+void ApplyFovScalarPatch(const ModuleRange& range, const char* source)
+{
+    if (!g_ultrawide_enabled || !g_fov_scaling || range.base == nullptr || g_fov_sites_refused) {
         return;
     }
 
-    if (!IsRvaInRange(range, kGlobalFovScalarRva, sizeof(float))) {
-        Log("%s: global FOV scalar RVA 0x%08lX is outside the loaded image", source, static_cast<unsigned long>(kGlobalFovScalarRva));
-        return;
-    }
-
-    auto* fov_scalar = reinterpret_cast<float*>(range.base + kGlobalFovScalarRva);
     const float target = GetTargetFovScalar();
     if (target <= 0.0f) {
         return;
     }
 
-    const DWORD current_bits = *reinterpret_cast<DWORD*>(fov_scalar);
-    const DWORD target_bits = FloatBits(target);
-    if (current_bits == target_bits) {
+    const float previous = g_fov_degrees_to_radians;
+    g_fov_degrees_to_radians = target;
+    if (!g_fov_sites_patched) {
+        if (!PatchFovSites(range, source)) {
+            g_fov_sites_refused = true;
+            return;
+        }
+        g_fov_sites_patched = true;
+    } else if (FloatBits(previous) == FloatBits(target)) {
         return;
     }
-
-    if (current_bits != kOriginalFovScalarBits && !g_global_fov_scalar_patched) {
-        Log(
-            "%s: global FOV scalar mismatch at RVA 0x%08lX current=0x%08lX expected=0x%08lX target=%.6f",
-            source,
-            static_cast<unsigned long>(kGlobalFovScalarRva),
-            static_cast<unsigned long>(current_bits),
-            static_cast<unsigned long>(kOriginalFovScalarBits),
-            static_cast<double>(target)
-        );
-        return;
-    }
-
-    if (WriteMemory(fov_scalar, &target, sizeof(target))) {
-        Log(
-            "%s: patched global FOV scalar RVA 0x%08lX %.6f -> %.6f",
-            source,
-            static_cast<unsigned long>(kGlobalFovScalarRva),
-            static_cast<double>(*reinterpret_cast<const float*>(&current_bits)),
-            static_cast<double>(target)
-        );
-        g_global_fov_scalar_patched = true;
-    } else {
-        Log("%s: failed to patch global FOV scalar", source);
-    }
+    Log("%s: FOV scalar %.6f -> %.6f", source, static_cast<double>(previous), static_cast<double>(target));
 }
 
 bool ContainsInsensitive(const char* haystack, const char* needle)
@@ -2114,7 +2218,7 @@ void ApplyUltrawideInstrumentation()
 
     const ModuleRange exe = GetExeRange();
     ApplyAspectConstantPatch(exe, "Ultrawide");
-    ApplyGlobalFovScalarPatch(exe, "Ultrawide");
+    ApplyFovScalarPatch(exe, "Ultrawide");
 }
 
 DWORD CallerRva(void* caller)
@@ -4387,7 +4491,7 @@ void ApplyPatches()
     ApplyCockpitPassengersPatch(exe);
     ApplyMovieDrawPatch(exe);
     ApplyAspectConstantPatch(exe, "Init");
-    ApplyGlobalFovScalarPatch(exe, "Init");
+    ApplyFovScalarPatch(exe, "Init");
     ApplyTrafficRadiusPatch(exe);
     Log(
         "Config: MapDetailLODThresholdScale=%.3f VehicleLODThresholdScale=%.3f VehicleFullDetail=%d VehicleDrawDistance=%.0f TrafficSpawnRadius=%.0f TrafficDiagnostics=%d DRLFlares=%d/%d/%d CockpitPassengers=%d ShadowMapSize=%d",
@@ -4426,7 +4530,7 @@ DWORD WINAPI InitThread(LPVOID)
         }
         if (tick % 4 == 0) {
             ApplyAspectConstantPatch(exe, "Loop");
-            ApplyGlobalFovScalarPatch(exe, "Loop");
+            ApplyFovScalarPatch(exe, "Loop");
             ApplyImposterDrawDistancePatch(exe, "Loop");
             ApplyInterestingVehiclePatch(exe, "Loop");
             ApplyTrafficVehiclePoolPreload(exe, "Loop");
