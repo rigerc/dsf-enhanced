@@ -431,6 +431,8 @@ void Dlss5OnReset();
 extern bool g_dlaa_jitter;
 void LoadDlaaConfig(const char* ini_path);
 void LoadToggleConfig(const char* ini_path);
+void LoadWorldBaseConfig(const char* ini_path);
+void WorldBaseFrameEnd(IDirect3DDevice9* device);
 void LoadReplayConfig(const char* ini_path);
 void DlaaApplyPresentation(D3DPRESENT_PARAMETERS* pp, const char* source);
 DWORD DlaaSamplerLodBias(DWORD sampler, DWORD value);
@@ -620,6 +622,7 @@ void LoadConfig()
     LoadDlss5Config(ini_path);
     LoadDlaaConfig(ini_path);
     LoadToggleConfig(ini_path);
+    LoadWorldBaseConfig(ini_path);
     LoadReplayConfig(ini_path);
     g_file_redirect = GetPrivateProfileIntA("Files", "Redirect", 1, ini_path) != 0;
 }
@@ -4456,6 +4459,8 @@ void ApplyCockpitPassengersPatch(const ModuleRange& range)
     Log("CockpitPassengers: the player car's passengers are drawn in the in-car cameras");
 }
 
+#include "world_base.inl"
+
 void ApplyPatches()
 {
     const ModuleRange exe = GetExeRange();
@@ -4501,6 +4506,7 @@ void ApplyPatches()
     ApplyAspectConstantPatch(exe, "Init");
     ApplyFovScalarPatch(exe, "Init");
     ApplyTrafficRadiusPatch(exe);
+    ApplyWorldBasePatch(exe);
     Log(
         "Config: MapDetailLODThresholdScale=%.3f VehicleLODThresholdScale=%.3f VehicleFullDetail=%d VehicleDrawDistance=%.0f TrafficSpawnRadius=%.0f TrafficDiagnostics=%d DRLFlares=%d/%d/%d CockpitPassengers=%d ShadowMapSize=%d",
         static_cast<double>(g_map_detail_lod_threshold_scale),
@@ -4531,6 +4537,7 @@ DWORD WINAPI InitThread(LPVOID)
         LogPendingReferencePeak(exe);
         LogReleaseListPeak();
         LogDrawQueueUse(exe);
+        LogWorldBaseStats();
         if (tick % 4 == 0) {
             LogResourceArenaUse();
             LogResourceManagerTables(exe);
