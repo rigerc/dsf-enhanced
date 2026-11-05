@@ -1,12 +1,15 @@
+import hashlib
 import json
 
 import pytest
 
-from dsfworld.config import BACKUP_DIR, Config
+from dsfworld.config import BACKUP_DIR, MAP_DIR, Config
 from dsfworld.stages import install, plugin
 
+FIXED = b"".join(plugin.FIXES)  # what a DSF Enhanced with the fixes and the redirect holds
+
 RELEASE = {
-    plugin.ASI: b"new plugin " + plugin.FIXES,
+    plugin.ASI: b"new plugin " + FIXED,
     plugin.INI: b"[Limits]\nSubmodelTableExtraNodes=60000\n",
     plugin.LOADER: b"loader built at C:/projects/ultimate-asi-loader/",
 }
@@ -38,14 +41,14 @@ def game(tmp_path, monkeypatch):
 
 
 def manifest(cfg):
-    return json.loads((cfg.game_dir / BACKUP_DIR / install.MANIFEST).read_text())
+    return json.loads((cfg.game_dir / MAP_DIR / install.MANIFEST).read_text())
 
 
 def test_checks(tmp_path):
     assert "isn't installed" in plugin.problem(tmp_path)
     (tmp_path / plugin.ASI).write_bytes(b"old plugin")
     assert "too old" in plugin.problem(tmp_path)
-    (tmp_path / plugin.ASI).write_bytes(b"..." + plugin.FIXES)
+    (tmp_path / plugin.ASI).write_bytes(b"..." + FIXED)
     assert "no ASI loader" in plugin.problem(tmp_path)
     (tmp_path / "dinput8.dll").write_bytes(RELEASE[plugin.LOADER])
     assert plugin.problem(tmp_path) is None
@@ -53,11 +56,15 @@ def test_checks(tmp_path):
     assert "SubmodelTableExtraNodes" in plugin.problem(tmp_path)
     (tmp_path / plugin.INI).write_text("[Limits]\nPendingResourceReferences=131072\n")
     assert plugin.problem(tmp_path) is None
+    (tmp_path / plugin.INI).write_text("[Files]\nRedirect=0\n")
+    assert "Redirect" in plugin.problem(tmp_path)
+    (tmp_path / plugin.ASI).write_bytes(b"limits only " + plugin.FIXES[0])
+    assert "too old" in plugin.problem(tmp_path)
 
 
 def test_a_plugin_in_scripts_counts(tmp_path):
     (tmp_path / "scripts").mkdir()
-    (tmp_path / "scripts" / plugin.ASI).write_bytes(b"..." + plugin.FIXES)
+    (tmp_path / "scripts" / plugin.ASI).write_bytes(b"..." + FIXED)
     (tmp_path / "winmm.dll").write_bytes(RELEASE[plugin.LOADER])
     assert plugin.find_asi(tmp_path) == tmp_path / "scripts" / plugin.ASI
     assert not plugin.needed(tmp_path)
@@ -75,7 +82,8 @@ def test_install_puts_the_plugin_in_with_the_map(game, bundled):
     d = game.game_dir
     for name, data in RELEASE.items():
         assert (d / name).read_bytes() == data
-    assert game.game_archive.read_bytes() == b"build"
+    assert (d / MAP_DIR / "w.dngc").read_bytes() == b"build"
+    assert game.game_archive.read_bytes() == b"original"
     assert set(manifest(game)["plugin"]["placed"]) == set(RELEASE)
 
 
@@ -90,7 +98,7 @@ def test_install_replaces_an_old_plugin_where_it_is_and_keeps_the_players_ini_an
     assert not (d / plugin.ASI).exists()  # no second copy for the loader to load
     assert (d / "scripts" / plugin.INI).read_text() == "[General]\nLog=0\n"
     assert not (d / plugin.LOADER).exists()
-    assert (d / BACKUP_DIR / "plugin" / "scripts" / plugin.ASI).read_bytes() == b"old plugin"
+    assert (d / MAP_DIR / "plugin" / "scripts" / plugin.ASI).read_bytes() == b"old plugin"
     install.uninstall(game)
     assert (d / "scripts" / plugin.ASI).read_bytes() == b"old plugin"
     assert game.game_archive.read_bytes() == b"original"
@@ -98,9 +106,9 @@ def test_install_replaces_an_old_plugin_where_it_is_and_keeps_the_players_ini_an
 
 def test_a_plugin_with_the_fixes_but_no_loader_gets_only_the_loader(game, bundled):
     d = game.game_dir
-    (d / plugin.ASI).write_bytes(b"mine " + plugin.FIXES)
+    (d / plugin.ASI).write_bytes(b"mine " + FIXED)
     install.install(game, bundled)
-    assert (d / plugin.ASI).read_bytes() == b"mine " + plugin.FIXES
+    assert (d / plugin.ASI).read_bytes() == b"mine " + FIXED
     assert (d / plugin.LOADER).read_bytes() == RELEASE[plugin.LOADER]
     assert set(manifest(game)["plugin"]["placed"]) == {plugin.LOADER}
 
@@ -135,27 +143,11 @@ def test_a_bundled_plugin_without_the_fixes_is_refused(game, bundled):
 
 def test_ini_turning_a_fix_off_is_the_players_call(game):
     d = game.game_dir
-    (d / plugin.ASI).write_bytes(b"..." + plugin.FIXES)
+    (d / plugin.ASI).write_bytes(b"..." + FIXED)
     (d / plugin.LOADER).write_bytes(RELEASE[plugin.LOADER])
     (d / plugin.INI).write_text("[Limits]\nResourceArenaExtraNodes=0\n")
     with pytest.raises(SystemExit, match="ResourceArenaExtraNodes"):
         install.ready(game)
-
-
-def test_an_install_stopped_at_the_swap_can_be_redone_or_undone(game, bundled, monkeypatch):
-    def stop(_source, _target):
-        raise KeyboardInterrupt
-
-    swap = install._swap_in
-    monkeypatch.setattr(install, "_swap_in", stop)
-    with pytest.raises(KeyboardInterrupt):
-        install.install(game, bundled)
-    assert game.game_archive.read_bytes() == b"original"
-    monkeypatch.setattr(install, "_swap_in", swap)
-    install.uninstall(game)  # the original is still in place: undo takes the plugin out
-    assert not (game.game_dir / plugin.ASI).exists()
-    install.install(game, bundled)
-    assert game.game_archive.read_bytes() == b"build"
 
 
 def test_uninstall_after_only_the_plugin_went_in_cleans_up(game, bundled):
@@ -164,6 +156,46 @@ def test_uninstall_after_only_the_plugin_went_in_cleans_up(game, bundled):
     install._save(path, m)
     install.uninstall(game)
     assert not (game.game_dir / plugin.ASI).exists()
-    assert not (game.game_dir / BACKUP_DIR).exists()
+    assert not (game.game_dir / MAP_DIR).exists()
     with pytest.raises(SystemExit, match="Nothing to undo"):
         install.uninstall(game)
+
+
+def test_a_forza_plugin_that_doesnt_pass_files_on_is_found(tmp_path):
+    assert plugin.forza_too_old(tmp_path) is None
+    (tmp_path / "plugins").mkdir()
+    (tmp_path / "plugins" / plugin.FORZA_ASI).write_bytes(b"DSFFORZA-CAPABILITIES: archive.packages archive.ids")
+    assert plugin.forza_too_old(tmp_path) == tmp_path / "plugins" / plugin.FORZA_ASI
+    (tmp_path / "plugins" / plugin.FORZA_ASI).write_bytes(b"DSFFORZA-CAPABILITIES: archive.ids " + plugin.FORZA_CHAIN)
+    assert plugin.forza_too_old(tmp_path) is None
+
+
+def test_the_plugin_a_swapped_install_put_in_comes_out_with_the_new_one(game, bundled):
+    """A version 0.1 install put DSF Enhanced in over an old one: the record and the old one's backup move
+    to the new folder, and uninstall still puts the old one back."""
+    d = game.game_dir
+    old = d / BACKUP_DIR
+    (old / "plugin").mkdir(parents=True)
+    (old / "plugin" / plugin.ASI).write_bytes(b"old plugin")
+    (old / "w.dngc").write_bytes(b"original")
+    game.game_archive.write_bytes(b"old build")
+    (d / plugin.ASI).write_bytes(RELEASE[plugin.ASI])
+    (d / plugin.LOADER).write_bytes(RELEASE[plugin.LOADER])
+    placed = {name: hashlib.sha256(RELEASE[name]).hexdigest() for name in (plugin.ASI, plugin.LOADER)}
+    (old / install.MANIFEST).write_text(
+        json.dumps(
+            {
+                "original": hashlib.sha256(b"original").hexdigest(),
+                "installed": hashlib.sha256(b"old build").hexdigest(),
+                "plugin": {"placed": placed, "replaced": [plugin.ASI]},
+            }
+        )
+    )
+    install.install(game, bundled)
+    assert not old.exists()
+    assert game.game_archive.read_bytes() == b"original"
+    assert manifest(game)["plugin"]["replaced"] == [plugin.ASI]
+    install.uninstall(game)
+    assert (d / plugin.ASI).read_bytes() == b"old plugin"
+    assert not (d / plugin.LOADER).exists()
+    assert not (d / MAP_DIR).exists()

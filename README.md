@@ -59,7 +59,7 @@ Settings, costs and known limitations are in [docs/dlss5-dlaa.md](https://github
 
 ## worldlod
 
-When you Shift up, the game draws the whole city as one low-detail model: flat ground and plain building shells. worldlod rebuilds that model from the game's own detailed areas, with real roads, kerbs, trees, building detail and painted road text. It reads your `san_francisco.dngc` and writes the new map into it, keeping a backup. No game data is shipped.
+When you Shift up, the game draws the whole city as one low-detail model: flat ground and plain building shells. worldlod rebuilds that model from the game's own detailed areas, with real roads, kerbs, trees, building detail and painted road text. It reads your `san_francisco.dngc` and puts the new map beside it, which DSF Enhanced opens in place of the game's own (that file is not changed). No game data is shipped.
 
 Stock on the left, worldlod on the right:
 
@@ -67,7 +67,7 @@ Stock on the left, worldlod on the right:
 
 ![City blocks and a park, stock and worldlod](worldlod/research/img/close-blocks.jpg)
 
-To install, unzip `worldlod-<version>.zip` anywhere, close the game and double-click `install.cmd`. The first time, it asks for the game folder and installs [uv](https://docs.astral.sh/uv/) for the Python worldlod runs on. It adds the plugin if it's missing, then builds and installs the map in a minute or two. `install.cmd --uninstall` puts the original map back. Options and details are in [worldlod/README.md](worldlod/README.md).
+To install, unzip `worldlod-<version>.zip` anywhere, close the game and double-click `install.cmd`. The first time, it asks for the game folder and installs [uv](https://docs.astral.sh/uv/) for the Python worldlod runs on. It adds the plugin if it's missing, then builds and installs the map in a minute or two. `install.cmd --uninstall` takes it out again. Options and details are in [worldlod/README.md](worldlod/README.md).
 
 ## Building
 
