@@ -1,0 +1,88 @@
+-- Test fixture in the form of Felony Rework's felonyreworkconfig.txt: the setting names the DSF menu
+-- reads and writes, nothing of Felony Rework's own. (Felony Rework isn't in this repository.)
+
+-- Roadblocks
+
+FelonyReworkConfig_Roadblocks = true
+
+-- PursuitTermination
+
+FelonyReworkConfig_PursuitTermination = true
+
+-- NoNegativeWillpower
+
+FelonyReworkConfig_NoNegativeWillpower = true
+
+-- FelonyMusic
+
+FelonyReworkConfig_FelonyMusic = true
+
+-- Rubberbanding
+
+FelonyReworkConfig_Rubberbanding = false
+
+-- CrimeTracking
+
+FelonyReworkConfig_CrimeTracking = true
+
+-- CrimeTrackingReports
+
+FelonyReworkConfig_CrimeTrackingReports = true
+
+-- FelonyNightmares
+
+FelonyReworkConfig_FelonyNightmares = true
+
+-- FelonyNightmaresAlwaysOn
+
+FelonyReworkConfig_FelonyNightmaresAlwaysOn = false
+
+-- PatrolManager
+
+FelonyReworkConfig_PatrolManager = true
+
+-- RadioScanner
+
+FelonyReworkConfig_RadioScanner = true
+
+-- DisableTannerForCops
+
+FelonyReworkConfig_DisableTannerForCops = false
+
+-- DisableTanner
+
+FelonyReworkConfig_DisableTanner = false
+
+-- DisableCopCommentary
+
+FelonyReworkConfig_DisableCopCommentary = false
+
+-- CopDashCam
+
+FelonyReworkConfig_CopDashCam = true
+
+-- FelonyICrashCam
+
+FelonyReworkConfig_FelonyICrashCam = true
+
+-- FelonyFreeDriveICrashCam
+
+FelonyReworkConfig_FelonyFreeDriveICrashCam = false
+
+-- ExtremeSurvival
+
+FelonyReworkConfig_ExtremeSurvival = false
+
+-- ParkedVehicles
+
+FelonyReworkConfig_ParkedVehicles = false
+
+-- PoliceRightOfWay
+
+FelonyReworkConfig_PoliceRightOfWay = false
+
+-- SearchingCops
+
+FelonyReworkConfig_SearchingCops = false
+
+FelonyReworkConfigLoaded = true

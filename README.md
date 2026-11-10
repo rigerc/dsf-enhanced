@@ -69,6 +69,16 @@ Stock on the left, worldlod on the right:
 
 To install, unzip `worldlod-<version>.zip` anywhere, close the game and double-click `install.cmd`. The first time, it asks for the game folder and installs [uv](https://docs.astral.sh/uv/) for the Python worldlod runs on. It adds the plugin if it's missing, then builds and installs the map in a minute or two. `install.cmd --uninstall` takes it out again. Options and details are in [worldlod/README.md](worldlod/README.md).
 
+## DSF menu
+
+An in-game menu and trainer in Lua, on DriverNGHook (Felony Rework installs one):
+
+- F2 menus, with settings windows for DSF Enhanced and Felony Rework;
+- a controller menu, drawn in the game's own HUD (hold D-pad up);
+- trainer options for cheats, cars, traffic, teleports, missions and the world.
+
+`dsfmenu/install.sh` installs it on Linux. Details are in [dsfmenu/README.md](dsfmenu/README.md).
+
 ## Building
 
 You need Windows, PowerShell, and the Visual Studio 2022 C++ build tools (x86 and x64) with a Windows SDK. From the repository root:

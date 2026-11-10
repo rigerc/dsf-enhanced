@@ -47,8 +47,11 @@ jobs:
           sudo bash "$RUNNER_TEMP/llvm.sh" "$LLVM_VERSION"
           sudo dpkg --add-architecture i386
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends "lld-$LLVM_VERSION" libarchive-tools wine wine64 wine32:i386
+          sudo apt-get install -y --no-install-recommends "lld-$LLVM_VERSION" libarchive-tools wine wine64 wine32:i386 lua5.1
           echo "/usr/lib/llvm-$LLVM_VERSION/bin" >> "$GITHUB_PATH"
+
+      - name: Test The DSF Menu
+        run: dsfmenu/tests/run.sh
 
       # The Microsoft files change only when the cache key does; xwin fetches the current
       # Visual Studio manifest when it runs.
