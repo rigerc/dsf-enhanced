@@ -213,19 +213,48 @@ local function prettyName(id, s)
     return name
 end
 
+-- Cars that driversf-forza's dsfcars adds (dsfcars\register.lua): their vehicleStats entry is
+-- a copy of a host car's, Picture1 and Year included, so they're named from dsfcars' own list.
+local function addedCars()
+    local reg = rawget(_G, "dsfcarsRegister")
+    return type(reg) == "table" and type(reg.cars) == "table" and reg.cars or nil
+end
+
+local function addedName(id, car)
+    local make = type(car.make) == "string" and car.make ~= "" and (car.make .. " ") or ""
+    local name = make .. (type(car.model) == "string" and car.model ~= "" and car.model or ("Model " .. id))
+    if car.year then
+        name = name .. " (" .. tostring(car.year) .. ")"
+    end
+    return name
+end
+
+-- Rebuilt whenever vehicleStats or dsfcars' list changes: added cars register after the
+-- menu may have built it.
 local function carList()
-    if T.cars and #T.cars > 0 then return T.cars end
-    local cars = {}
     local stats = rawget(_G, "vehicleStats")
+    local added = addedCars()
+    local n = 0
+    if type(stats) == "table" then
+        for id, s in pairs(stats) do
+            if type(id) == "number" and type(s) == "table" then n = n + 1 end
+        end
+    end
+    if T.cars and T.carsKey == n and T.carsStats == stats and T.carsAdded == added then
+        return T.cars
+    end
+    local cars = {}
     if type(stats) == "table" then
         for id, s in pairs(stats) do
             if type(id) == "number" and type(s) == "table" then
-                cars[#cars + 1] = { id = id, name = prettyName(id, s) }
+                local car = added and added[id]
+                local name = type(car) == "table" and addedName(id, car) or prettyName(id, s)
+                cars[#cars + 1] = { id = id, name = name }
             end
         end
         table.sort(cars, function(a, b) return a.name < b.name end)
     end
-    T.cars = cars
+    T.cars, T.carsKey, T.carsStats, T.carsAdded = cars, n, stats, added
     return cars
 end
 

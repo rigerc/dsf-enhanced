@@ -464,6 +464,15 @@ callback("Menu_Shoulder_R1"); tick(10); calls = {}; tick(); assert(seen("[Model 
 local names = {}
 for _, c in ipairs(DSFTrainer.cars) do names[#names + 1] = c.name end
 assert(table.concat(names, "|") == "Alfa Romeo 159 Ti (2009)|Amc Pacer (1980)|Dodge Challenger (1970)|Model 999", table.concat(names, "|"))
+-- a car dsfcars registers later (a copy of its host's entry) joins the list under its own name
+vehicleStats[1] = { Picture1 = "dodge_challanger", Year = 1970, ModelName = "ID:700001" }
+dsfcarsRegister = { cars = { [1] = { make = "Community", model = "Synthetic Test Car" } } }
+calls = {}; tick()
+names = {}
+for _, c in ipairs(DSFTrainer.cars) do names[#names + 1] = c.name end
+assert(table.concat(names, "|") == "Alfa Romeo 159 Ti (2009)|Amc Pacer (1980)|Community Synthetic Test Car|Dodge Challenger (1970)|Model 999", table.concat(names, "|"))
+vehicleStats[1] = nil; dsfcarsRegister = nil
+calls = {}; tick(); assert(#DSFTrainer.cars == 4, "added car gone again")
 callback("Menu_Left"); tick(10)  -- 4 -> 3, the Dodge
 calls = {}; tick(); assert(seen("[Dodge Challenger (1970)]"), "the Dodge")
 gvA.model_id = 1   -- not the Dodge, which the mock car starts as
