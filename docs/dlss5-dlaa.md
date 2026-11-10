@@ -104,7 +104,7 @@ Proton's DXVK loads its Vulkan functions from `winevulkan.dll`, not `vulkan-1.dl
 
 Why the other builds crash: both transports open the helper's D3D12 fences in the game. Proton Experimental and Hotfix, Proton-CachyOS 11 and GE-Proton 11 (as of 2026-11) emulate D3D12 fences in the memory of the process that created them. A fence opened from another process logs `fixme:vulkan:win32u_vkImportSemaphoreWin32HandleKHR d3d12 fence from other process`, then follows a pointer that is only valid in the helper, and the game stops with an access violation inside `win32u.so`. Proton 11.0 doesn't have that emulation and opens the fence as a plain timeline semaphore.
 
-Under Wine, DSF Enhanced looks for that message in the `win32u.so` the game loaded (found through `/proc/self/maps`). If it's there, the helper stays off and `dsf_enhanced.log` says to use Proton 11.0. `[DLSS5] HelperUnderWine=1` starts the helper anyway, to try a newer build. Proton writes its own log with `PROTON_LOG=1` in the launch options, to `~/steam-33440.log`.
+Under Wine, DSF Enhanced looks for that message in the `win32u.so` of the Wine running the game: it finds the file through `WINEDLLPATH`, which Proton sets to its own `files/lib/wine`. If it's there, the helper stays off and `dsf_enhanced.log` says to use Proton 11.0. `[DLSS5] HelperUnderWine=1` starts the helper anyway, to try a newer build. Proton writes its own log with `PROTON_LOG=1` in the launch options, to `~/steam-33440.log`.
 
 The Proton 9 and 10 builds checked (Proton 9.0, GE-Proton10-33, Proton-CachyOS 10, UMU-Proton 10) don't contain Wine's shared-fence import, so they weren't tried.
 

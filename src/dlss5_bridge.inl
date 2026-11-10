@@ -1164,7 +1164,7 @@ void D5InitFeatures()
     dlaa.state = g_dlaa_enable ? D5_FEATURE_IDLE : D5_FEATURE_OFF;
 }
 
-// Reads a whole file, also one whose size reads as 0 (/proc). Empty if it can't be read.
+// Reads a whole file. Empty if it can't be read.
 std::string D5ReadWholeFile(const char* path)
 {
     std::string out;
@@ -1186,8 +1186,10 @@ std::string D5ReadWholeFile(const char* path)
 // "d3d12 fence from other process" and then follows a pointer that is only valid in the helper,
 // and the game crashes on the first frame (Proton Experimental, Proton Hotfix, Proton-CachyOS 11
 // and GE-Proton 11 as of 2026-11). Builds without that emulation work (Proton 11.0, 11.0-2e).
-// Under Wine this finds the win32u.so the process loaded (/proc/self/maps through the Z: drive)
-// and looks for the message.
+// Under Wine this looks for the message in the win32u.so of the Wine running the game: the
+// x86_64-unix and i386-unix folders under each WINEDLLPATH entry (Proton sets it to its own
+// files/lib/wine), read through the Z: drive. /proc/self/maps doesn't do: Wine opens files in
+// the wineserver, so "self" is the wineserver.
 enum D5WineFences { D5_NOT_WINE, D5_WINE_FENCES_WORK, D5_WINE_FENCES_BROKEN, D5_WINE_FENCES_UNKNOWN };
 
 D5WineFences D5CheckWineFences(std::string* win32u)
@@ -1196,26 +1198,42 @@ D5WineFences D5CheckWineFences(std::string* win32u)
     if (ntdll == nullptr || GetProcAddress(ntdll, "wine_get_version") == nullptr) {
         return D5_NOT_WINE;
     }
-    const std::string maps = D5ReadWholeFile("Z:\\proc\\self\\maps");
-    std::size_t at = maps.find("/win32u.so");
-    if (at == std::string::npos) {
+    char env[8192];
+    const DWORD length = GetEnvironmentVariableA("WINEDLLPATH", env, sizeof(env));
+    if (length == 0 || length >= sizeof(env)) {
         return D5_WINE_FENCES_UNKNOWN;
     }
-    const std::size_t line = maps.rfind('\n', at) + 1;   // npos + 1 = 0 on the first line
-    const std::size_t start = maps.find('/', line);
-    const std::size_t end = maps.find('\n', at);
-    std::string path = "Z:" + maps.substr(start, (end == std::string::npos ? maps.size() : end) - start);
-    for (char& c : path) {
-        if (c == '/') {
-            c = '\\';
+    const std::string list(env, length);
+    bool found = false;
+    for (std::size_t start = 0; start <= list.size();) {
+        std::size_t end = list.find(':', start);
+        if (end == std::string::npos) {
+            end = list.size();
+        }
+        const std::string dir = list.substr(start, end - start);
+        start = end + 1;
+        if (dir.empty() || dir[0] != '/') {
+            continue;
+        }
+        for (const char* arch : {"/x86_64-unix/win32u.so", "/i386-unix/win32u.so"}) {
+            std::string path = "Z:" + dir + arch;
+            for (char& c : path) {
+                if (c == '/') {
+                    c = '\\';
+                }
+            }
+            const std::string library = D5ReadWholeFile(path.c_str());
+            if (library.empty()) {
+                continue;
+            }
+            found = true;
+            *win32u = path;
+            if (library.find("d3d12 fence from other process") != std::string::npos) {
+                return D5_WINE_FENCES_BROKEN;
+            }
         }
     }
-    *win32u = path;
-    const std::string library = D5ReadWholeFile(path.c_str());
-    if (library.empty()) {
-        return D5_WINE_FENCES_UNKNOWN;
-    }
-    return library.find("d3d12 fence from other process") != std::string::npos ? D5_WINE_FENCES_BROKEN : D5_WINE_FENCES_WORK;
+    return found ? D5_WINE_FENCES_WORK : D5_WINE_FENCES_UNKNOWN;
 }
 
 void D5BridgeStart(IDirect3DDevice9* device)
