@@ -1,4 +1,5 @@
 import struct
+import sys
 
 import numpy as np
 import pytest
@@ -122,8 +123,8 @@ def grid_group(material, x0, x1, n=12):
 
 
 def test_cell_simplification_keeps_material_boundaries_closed():
-    if not meshopt.DLL.exists():
-        pytest.skip("no meshopt.dll")
+    if sys.platform != "win32" or not meshopt.DLL.exists():
+        pytest.skip("meshopt.dll is Windows x64 only")
     from dsfworld import simplify
 
     left, right = grid_group(1, 0, 5), grid_group(2, 5, 10)

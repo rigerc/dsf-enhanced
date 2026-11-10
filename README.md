@@ -79,6 +79,14 @@ You need Windows, PowerShell, and the Visual Studio 2022 C++ build tools (x86 an
 .\install.ps1 -GamePath "D:\Games\Driver San Francisco"
 ```
 
+On Linux, `build.sh` builds the same files with clang-cl and lld-link (LLVM 19 or later: Microsoft's C++ library needs Clang 19), against Microsoft's C runtime and Windows SDK. It runs the tests under Wine. Get the Microsoft files once with [xwin](https://github.com/Jake-Shadle/xwin) (`cargo install xwin`). `--accept-license` accepts Microsoft's license for them.
+
+```sh
+xwin --accept-license --arch x86,x86_64 splat --use-winsysroot-style --preserve-ms-arch-notation --output ~/.xwin
+./build.sh                                           # everything into dist/
+./build.sh --skip-dlss5                              # without the DLSS 5 / DLAA helper
+```
+
 The helper build downloads NVIDIA's DLSS SDK headers and NGX loader, pinned by SHA-256. To release, push a version tag (`git tag v1.3.0`, `git push origin v1.3.0`). GitHub Actions then builds, tests and publishes both ZIPs.
 
 The source is in `src/`, tests in `tests/`, the helper in `dlss5/`, the map pipeline in `worldlod/`, and design notes in `research/`.

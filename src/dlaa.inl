@@ -170,10 +170,17 @@ float DlaaHalton(int index, int base)
 }
 
 // The bytecode's length is not passed; a malformed shader must not take the game down here.
+// The reads stay in a call of their own: clang-cl (with /EHsc) catches a fault in a called
+// function but drops the handler for a read in the __try's own function.
+__declspec(noinline) size_t DlaaTokenCountUnguarded(const DWORD* function)
+{
+    return vsjitter::TokenCount(reinterpret_cast<const std::uint32_t*>(function), 65536);
+}
+
 size_t DlaaTokenCount(const DWORD* function)
 {
     __try {
-        return vsjitter::TokenCount(reinterpret_cast<const std::uint32_t*>(function), 65536);
+        return DlaaTokenCountUnguarded(function);
     } __except (EXCEPTION_EXECUTE_HANDLER) {
         return 0;
     }

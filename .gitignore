@@ -19,3 +19,6 @@ worldlod/native/build/
 dlss5/build/
 dlss5/external/
 /out/
+
+# xwin (build.sh): its download cache, if run from the repository
+.xwin-cache/

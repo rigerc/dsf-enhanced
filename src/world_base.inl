@@ -70,41 +70,49 @@ T WorldBaseRead(const std::uint8_t* address)
     return value;
 }
 
+// The reads stay in a call of their own: clang-cl (with /EHsc) catches a fault in a called
+// function but drops the handler for a read in the __try's own function.
+__declspec(noinline) int WorldBaseClassifyUnguarded(int first, int index, const std::uint8_t* sector,
+    const std::uint8_t* context)
+{
+    const auto* descriptor = WorldBaseRead<const std::uint8_t*>(sector + 0x94);
+    const auto* owner = WorldBaseRead<const std::uint8_t*>(descriptor + 0x1C);
+    if (descriptor[0x10] == 0) {
+        const auto* gebi = WorldBaseRead<const std::uint8_t*>(owner + 8);
+        const auto column = WorldBaseRead<std::uint16_t>(gebi + 0x08);
+        const auto row = WorldBaseRead<std::uint16_t>(gebi + 0x0A);
+        if (column < 29 && row * 29 + column < kWorldBaseCells) {
+            g_cell_detail_drawn_at[row * 29 + column] = GetTickCount();
+        }
+        return kWorldBaseRegion;
+    }
+    const auto* state = WorldBaseRead<const std::uint8_t*>(descriptor + 0x18);
+    const int i = first + index;
+    const auto record_index = WorldBaseRead<std::uint16_t>(WorldBaseRead<const std::uint8_t*>(owner + 0x2C0C) + i * 2);
+    const auto* records = WorldBaseRead<const std::uint8_t*>(WorldBaseRead<const std::uint8_t*>(owner + 8) + 4);
+    const std::uint32_t group = (WorldBaseRead<std::uint32_t>(records + record_index * 0x14 + 4) >> 20) & 0x19;
+    const int kind = group == 0 ? kWorldBaseShell : group == 1 ? kWorldBaseTerrain : kWorldBaseOther;
+
+    const auto cell = WorldBaseRead<std::uint16_t>(state + 0x1E7B0 + i * 2);
+    const int drawn = cell < kWorldBaseCells && GetTickCount() - g_cell_detail_drawn_at[cell] < kWorldBaseDrawnMs
+        ? kWorldBaseDrawn : 0;
+    const std::uint32_t key = (static_cast<std::uint32_t>(cell / 29) << 16) | (cell % 29);
+    const auto* world = WorldBaseRead<const std::uint8_t*>(context + 0xD4);
+    const std::uint8_t* end = world + 0x347E8;
+    const auto* node = WorldBaseRead<const std::uint8_t*>(world + 0x347EC);
+    for (int guard = 0; node != end && node != nullptr && guard < 4096; ++guard) {
+        if (WorldBaseRead<std::uint32_t>(node + 0x0C) == key) {
+            return kind | kWorldBaseLoaded | drawn;
+        }
+        node = WorldBaseRead<const std::uint8_t*>(node + 4);
+    }
+    return kind | drawn;
+}
+
 int WorldBaseClassify(int first, int index, const std::uint8_t* sector, const std::uint8_t* context)
 {
     __try {
-        const auto* descriptor = WorldBaseRead<const std::uint8_t*>(sector + 0x94);
-        const auto* owner = WorldBaseRead<const std::uint8_t*>(descriptor + 0x1C);
-        if (descriptor[0x10] == 0) {
-            const auto* gebi = WorldBaseRead<const std::uint8_t*>(owner + 8);
-            const auto column = WorldBaseRead<std::uint16_t>(gebi + 0x08);
-            const auto row = WorldBaseRead<std::uint16_t>(gebi + 0x0A);
-            if (column < 29 && row * 29 + column < kWorldBaseCells) {
-                g_cell_detail_drawn_at[row * 29 + column] = GetTickCount();
-            }
-            return kWorldBaseRegion;
-        }
-        const auto* state = WorldBaseRead<const std::uint8_t*>(descriptor + 0x18);
-        const int i = first + index;
-        const auto record_index = WorldBaseRead<std::uint16_t>(WorldBaseRead<const std::uint8_t*>(owner + 0x2C0C) + i * 2);
-        const auto* records = WorldBaseRead<const std::uint8_t*>(WorldBaseRead<const std::uint8_t*>(owner + 8) + 4);
-        const std::uint32_t group = (WorldBaseRead<std::uint32_t>(records + record_index * 0x14 + 4) >> 20) & 0x19;
-        const int kind = group == 0 ? kWorldBaseShell : group == 1 ? kWorldBaseTerrain : kWorldBaseOther;
-
-        const auto cell = WorldBaseRead<std::uint16_t>(state + 0x1E7B0 + i * 2);
-        const int drawn = cell < kWorldBaseCells && GetTickCount() - g_cell_detail_drawn_at[cell] < kWorldBaseDrawnMs
-            ? kWorldBaseDrawn : 0;
-        const std::uint32_t key = (static_cast<std::uint32_t>(cell / 29) << 16) | (cell % 29);
-        const auto* world = WorldBaseRead<const std::uint8_t*>(context + 0xD4);
-        const std::uint8_t* end = world + 0x347E8;
-        const auto* node = WorldBaseRead<const std::uint8_t*>(world + 0x347EC);
-        for (int guard = 0; node != end && node != nullptr && guard < 4096; ++guard) {
-            if (WorldBaseRead<std::uint32_t>(node + 0x0C) == key) {
-                return kind | kWorldBaseLoaded | drawn;
-            }
-            node = WorldBaseRead<const std::uint8_t*>(node + 4);
-        }
-        return kind | drawn;
+        return WorldBaseClassifyUnguarded(first, index, sector, context);
     } __except (EXCEPTION_EXECUTE_HANDLER) {
         return kWorldBaseOther | kWorldBaseFault;
     }

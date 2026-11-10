@@ -1,10 +1,9 @@
-name: Build And Release
+name: Build And Release (Windows, manual)
 
+# Off in this fork: linux.yml builds, tests and releases. This one runs only when started by
+# hand (Actions, "Run workflow"), to compare an MSVC build with the Linux one.
 on:
   workflow_dispatch:
-  push:
-    tags:
-      - "v*"
 
 permissions:
   contents: write

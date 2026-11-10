@@ -1,0 +1,108 @@
+name: Build And Release (Linux)
+
+# Builds the plugin, the DLSS 5 helper and the release ZIPs with build.sh: clang-cl and lld-link
+# against Microsoft's C runtime and Windows SDK (from xwin), the tests under Wine. A v* tag
+# publishes the ZIPs as a GitHub release; any other run uploads them as an artifact.
+
+on:
+  workflow_dispatch:
+  push:
+    branches: ["**"]
+    tags:
+      - "v*"
+  pull_request:
+
+permissions:
+  contents: write
+
+env:
+  # Microsoft's C++ library (MSVC 14.44) needs Clang 19 or later; Ubuntu 24.04 ships 18.
+  LLVM_VERSION: "20"
+  XWIN_VERSION: "0.10.0"
+  XWIN_SHA256: "d870eb4b2f390878af6da1ccd3cf321d22fcb72720984853b4be732ae597fc88"
+
+jobs:
+  build-release:
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set Up uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.13.5"
+
+      - name: Test worldlod
+        working-directory: worldlod
+        run: |
+          uv run --frozen ruff check
+          uv run --frozen ruff format --check
+          uv run --frozen pytest
+
+      - name: Install LLVM, bsdtar and Wine
+        run: |
+          curl -fsSL https://apt.llvm.org/llvm.sh -o "$RUNNER_TEMP/llvm.sh"
+          sudo bash "$RUNNER_TEMP/llvm.sh" "$LLVM_VERSION"
+          sudo dpkg --add-architecture i386
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends "lld-$LLVM_VERSION" libarchive-tools wine wine64 wine32:i386
+          echo "/usr/lib/llvm-$LLVM_VERSION/bin" >> "$GITHUB_PATH"
+
+      # The Microsoft files change only when the cache key does; xwin fetches the current
+      # Visual Studio manifest when it runs.
+      - name: Cache The Microsoft CRT And Windows SDK
+        id: xwin-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.xwin
+          key: xwin-${{ env.XWIN_VERSION }}-x86-x64-v1
+
+      - name: Get The Microsoft CRT And Windows SDK
+        if: steps.xwin-cache.outputs.cache-hit != 'true'
+        run: |
+          name="xwin-$XWIN_VERSION-x86_64-unknown-linux-musl"
+          curl -fsSL -o "$RUNNER_TEMP/$name.tar.gz" "https://github.com/Jake-Shadle/xwin/releases/download/$XWIN_VERSION/$name.tar.gz"
+          echo "$XWIN_SHA256  $RUNNER_TEMP/$name.tar.gz" | sha256sum -c -
+          tar -xzf "$RUNNER_TEMP/$name.tar.gz" -C "$RUNNER_TEMP"
+          # --accept-license accepts Microsoft's license for the CRT and SDK files.
+          "$RUNNER_TEMP/$name/xwin" --accept-license --cache-dir "$RUNNER_TEMP/xwin-cache" --arch x86,x86_64 \
+            splat --use-winsysroot-style --preserve-ms-arch-notation --output ~/.xwin
+
+      - name: Build And Test
+        run: ./build.sh
+
+      - name: Verify Release Files
+        run: |
+          for path in dist/winmm.dll dist/dsf_enhanced.asi dist/dsf_enhanced.ini dist/README.md dist/LICENSE \
+                      dist/dlss5/dsf-dlss5-helper.exe dist/dlss5/NVIDIA-RTX-SDKs-LICENSE.txt dist/dlss5/README.txt \
+                      dist/DSF-Enhanced.zip dist/worldlod.zip; do
+            [ -f "$path" ] || { echo "Missing release file: $path"; exit 1; }
+          done
+
+      - name: Prepare Release Zips
+        run: |
+          # a branch name can hold "/" (manual runs): not in a file name
+          name="${GITHUB_REF_NAME//\//-}"
+          echo "ZIP_NAME=$name" >> "$GITHUB_ENV"
+          cp dist/DSF-Enhanced.zip "DSF-Enhanced-$name.zip"
+          cp dist/worldlod.zip "worldlod-$name.zip"
+
+      - name: Upload Test Artifact
+        if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: DSF-Enhanced-${{ env.ZIP_NAME }}
+          path: |
+            DSF-Enhanced-${{ env.ZIP_NAME }}.zip
+            worldlod-${{ env.ZIP_NAME }}.zip
+
+      - name: Create GitHub Release
+        if: ${{ startsWith(github.ref, 'refs/tags/v') }}
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: |
+            DSF-Enhanced-${{ env.ZIP_NAME }}.zip
+            worldlod-${{ env.ZIP_NAME }}.zip
