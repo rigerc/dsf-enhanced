@@ -16,6 +16,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <cmath>
+#include <string>
 #include <unordered_map>
 #include <vector>
 

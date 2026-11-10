@@ -56,6 +56,7 @@ enum D5Transport : int
 
 bool g_d5_helper_bypass = false;
 int g_d5_helper_transport = D5_TRANSPORT_AUTO;
+bool g_d5_helper_under_wine = false;
 char g_d5_helper_path[MAX_PATH] = {};
 char g_d5_helper_runtime[MAX_PATH] = {};
 char g_d5_helper_log[MAX_PATH] = {};
@@ -102,6 +103,7 @@ void LoadDlss5BridgeConfig(const char* ini_path)
 {
     g_d5_helper_bypass = GetPrivateProfileIntA("DLSS5", "HelperBypass", 0, ini_path) != 0;
     g_d5_helper_transport = ClampInt(GetPrivateProfileIntA("DLSS5", "HelperTransport", 0, ini_path), 0, 2);
+    g_d5_helper_under_wine = GetPrivateProfileIntA("DLSS5", "HelperUnderWine", 0, ini_path) != 0;
     ReadGamePathSetting("HelperPath", "dlss5\\dsf-dlss5-helper.exe", g_d5_helper_path, ini_path);
     ReadGamePathSetting("HelperRuntime", "dlss5", g_d5_helper_runtime, ini_path);
     ReadGamePathSetting("HelperLog", "dsf-dlss5-helper.log", g_d5_helper_log, ini_path);
@@ -515,7 +517,12 @@ bool D5VkInit(IDirect3DDevice9* device)
     uint32_t queue_index = 0;
     g_d5_vk_interop->GetSubmissionQueue(&g_d5_vk_queue, &queue_index, &g_d5_vk_family);
 
+    // The loader DXVK took its Vulkan functions from: vulkan-1.dll on Windows. Under Wine and Proton
+    // DXVK loads winevulkan.dll first, and vulkan-1.dll isn't in the process at all.
     HMODULE loader = GetModuleHandleA("vulkan-1.dll");
+    if (loader == nullptr) {
+        loader = GetModuleHandleA("winevulkan.dll");
+    }
     auto get_instance_proc = loader != nullptr ?
         reinterpret_cast<vkm::PFN_vkGetInstanceProcAddr>(GetProcAddress(loader, "vkGetInstanceProcAddr")) : nullptr;
     if (get_instance_proc == nullptr || g_d5_vk_device == nullptr || g_d5_vk_queue == nullptr) {
@@ -1157,12 +1164,79 @@ void D5InitFeatures()
     dlaa.state = g_dlaa_enable ? D5_FEATURE_IDLE : D5_FEATURE_OFF;
 }
 
+// Reads a whole file, also one whose size reads as 0 (/proc). Empty if it can't be read.
+std::string D5ReadWholeFile(const char* path)
+{
+    std::string out;
+    const HANDLE file = CreateFileA(path, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr, OPEN_EXISTING, 0, nullptr);
+    if (file == INVALID_HANDLE_VALUE) {
+        return out;
+    }
+    char buffer[65536];
+    DWORD read = 0;
+    while (ReadFile(file, buffer, sizeof(buffer), &read, nullptr) && read > 0) {
+        out.append(buffer, read);
+    }
+    CloseHandle(file);
+    return out;
+}
+
+// Whether the game can open the helper's D3D12 fences. Both transports do. Some Wine builds
+// emulate D3D12 fences in the creating process's memory: importing one from another process logs
+// "d3d12 fence from other process" and then follows a pointer that is only valid in the helper,
+// and the game crashes on the first frame (Proton Experimental, Proton Hotfix, Proton-CachyOS 11
+// and GE-Proton 11 as of 2026-11). Builds without that emulation work (Proton 11.0, 11.0-2e).
+// Under Wine this finds the win32u.so the process loaded (/proc/self/maps through the Z: drive)
+// and looks for the message.
+enum D5WineFences { D5_NOT_WINE, D5_WINE_FENCES_WORK, D5_WINE_FENCES_BROKEN, D5_WINE_FENCES_UNKNOWN };
+
+D5WineFences D5CheckWineFences(std::string* win32u)
+{
+    const HMODULE ntdll = GetModuleHandleA("ntdll.dll");
+    if (ntdll == nullptr || GetProcAddress(ntdll, "wine_get_version") == nullptr) {
+        return D5_NOT_WINE;
+    }
+    const std::string maps = D5ReadWholeFile("Z:\\proc\\self\\maps");
+    std::size_t at = maps.find("/win32u.so");
+    if (at == std::string::npos) {
+        return D5_WINE_FENCES_UNKNOWN;
+    }
+    const std::size_t line = maps.rfind('\n', at) + 1;   // npos + 1 = 0 on the first line
+    const std::size_t start = maps.find('/', line);
+    const std::size_t end = maps.find('\n', at);
+    std::string path = "Z:" + maps.substr(start, (end == std::string::npos ? maps.size() : end) - start);
+    for (char& c : path) {
+        if (c == '/') {
+            c = '\\';
+        }
+    }
+    *win32u = path;
+    const std::string library = D5ReadWholeFile(path.c_str());
+    if (library.empty()) {
+        return D5_WINE_FENCES_UNKNOWN;
+    }
+    return library.find("d3d12 fence from other process") != std::string::npos ? D5_WINE_FENCES_BROKEN : D5_WINE_FENCES_WORK;
+}
+
 void D5BridgeStart(IDirect3DDevice9* device)
 {
     if (!g_d5_helper || InterlockedCompareExchange(&g_d5_bridge_state, D5_BRIDGE_STARTING, D5_BRIDGE_OFF) != D5_BRIDGE_OFF) {
         return;
     }
     D5InitFeatures();
+    std::string win32u;
+    const D5WineFences wine = D5CheckWineFences(&win32u);
+    if (wine == D5_WINE_FENCES_BROKEN && !g_d5_helper_under_wine) {
+        Log("DLSS5 helper: %s can't open the helper's D3D12 fences in the game (it crashes on the first frame); "
+            "Proton 11.0 can", win32u.c_str());
+        D5BridgeFail("this Proton can't share the helper's fences; use Proton 11.0, or [DLSS5] HelperUnderWine=1 to try anyway");
+        return;
+    }
+    if (wine != D5_NOT_WINE) {
+        Log("DLSS5 helper: under Wine, %s: %s", win32u.empty() ? "win32u.so not found" : win32u.c_str(),
+            wine == D5_WINE_FENCES_WORK ? "opens fences from other processes" :
+            wine == D5_WINE_FENCES_BROKEN ? "can't open fences from other processes (HelperUnderWine=1)" : "not checked");
+    }
     D5InstallExceptionHandler();
     g_d5_transport = D5_TRANSPORT_CPU;
     if (g_d5_helper_transport != D5_TRANSPORT_CPU) {

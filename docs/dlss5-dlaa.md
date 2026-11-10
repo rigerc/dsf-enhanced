@@ -90,6 +90,24 @@ Measured on an RTX 5070 Ti with DXVK at 3440x1440. The game waits for the round 
 
 Preset L is estimated at twice DLAA's GPU time. Without DXVK, add about 15 ms. DLAA uses 150-200 MB of video memory and saves about 80 MB by dropping the swap chain's MSAA. `[DLSS5] FrameTimeLog=1` logs the costs.
 
+## Linux and Proton
+
+DLAA works under **Proton 11.0** (Valve's, version `proton-11.0-2e`). Several other Proton builds crash the game on the first DLAA frame, and DSF Enhanced keeps the helper off on those.
+
+Tested with an RTX 3070, NVIDIA driver 615.78 and DLAA preset K at 2560x1440: about 1.5 ms of GPU time and 3 ms round trip per frame on the Vulkan transport, over several thousand frames.
+
+1. In Steam, open the game's Properties, then Compatibility, and choose **Proton 11.0**. That's not Proton Experimental or Hotfix, and not a Proton-CachyOS or GE-Proton build.
+2. Put `PROTON_ENABLE_NVAPI=1` in the game's launch options, before anything else there.
+3. Don't add DXVK's `d3d9.dll`. Proton's own d3d9 is DXVK and has the interop DSF Enhanced needs. Copy the `dlss5` folder and NVIDIA's DLL as on Windows, and set `[DLAA] Enable=1`.
+
+Proton's DXVK loads its Vulkan functions from `winevulkan.dll`, not `vulkan-1.dll`. DSF Enhanced looks for both.
+
+Why the other builds crash: both transports open the helper's D3D12 fences in the game. Proton Experimental and Hotfix, Proton-CachyOS 11 and GE-Proton 11 (as of 2026-11) emulate D3D12 fences in the memory of the process that created them. A fence opened from another process logs `fixme:vulkan:win32u_vkImportSemaphoreWin32HandleKHR d3d12 fence from other process`, then follows a pointer that is only valid in the helper, and the game stops with an access violation inside `win32u.so`. Proton 11.0 doesn't have that emulation and opens the fence as a plain timeline semaphore.
+
+Under Wine, DSF Enhanced looks for that message in the `win32u.so` the game loaded (found through `/proc/self/maps`). If it's there, the helper stays off and `dsf_enhanced.log` says to use Proton 11.0. `[DLSS5] HelperUnderWine=1` starts the helper anyway, to try a newer build. Proton writes its own log with `PROTON_LOG=1` in the launch options, to `~/steam-33440.log`.
+
+The Proton 9 and 10 builds checked (Proton 9.0, GE-Proton10-33, Proton-CachyOS 10, UMU-Proton 10) don't contain Wine's shared-fence import, so they weren't tried.
+
 ## Known limitations
 
 - Experimental, tested on one RTX 5070 Ti with DXVK. That covers single-player driving (chase, cockpit and side views, the Shift zoom, the pause menu) and Film Director replays, at 1280x720 and 3440x1440 borderless, DLAA preset K, and DLSS 5 with both `Input` values. Split screen, preset L, the CPU path without DXVK and other GPUs are untested in game.
